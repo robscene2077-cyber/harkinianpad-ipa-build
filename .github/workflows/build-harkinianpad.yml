@@ -38,26 +38,43 @@ jobs:
           PADMINT_HOME="$RUNNER_TEMP/padmint" \
             /usr/bin/python3 scripts/github-build.py harkinianpad --out "$RUNNER_TEMP/out"
 
-      - name: Checksum and publish IPA
+      - name: Check out this repository for release
+        uses: actions/checkout@v4
+        with:
+          path: release-repo
+          persist-credentials: false
+
+      - name: Collect, checksum and publish IPA
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/out"
-          ls -la
+          echo "Files in build output:"
+          find "$RUNNER_TEMP/out" -maxdepth 2 -type f -print || true
+          IPA="$(find "$RUNNER_TEMP/out" -type f -name '*.ipa' -print -quit)"
+          if [ -z "$IPA" ]; then
+            echo "No IPA produced" >&2
+            exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/release"
+          cp "$IPA" "$GITHUB_WORKSPACE/release/"
+          cd "$GITHUB_WORKSPACE/release"
           shasum -a 256 ./*.ipa > SHA256SUMS
+          cat SHA256SUMS
+          cd "$GITHUB_WORKSPACE/release-repo"
           gh release create "build-${{ github.run_id }}" \
             --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" \
             --title "HarkinianPad unsigned IPA (${{ github.run_number }})" \
             --notes "Unsigned, ROM-free HarkinianPad IPA built from chrissotraidis/padmint via GitHub Actions. Re-sign with AltStore/SideStore/Sideloadly before installing." \
-            ./*.ipa SHA256SUMS
+            "$GITHUB_WORKSPACE/release/"*.ipa "$GITHUB_WORKSPACE/release/SHA256SUMS"
 
       - name: Upload artifact as backup
         uses: actions/upload-artifact@v4
         with:
           name: harkinianpad-unsigned-ipa
           path: |
-            ${{ runner.temp }}/out/*.ipa
-            ${{ runner.temp }}/out/SHA256SUMS
-          retention-days: 1
+            ${{ github.workspace }}/release/*.ipa
+            ${{ github.workspace }}/release/SHA256SUMS
+          retention-days: 7
           if-no-files-found: error
